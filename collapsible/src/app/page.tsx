@@ -9,6 +9,7 @@ type Deletion = {
   len: number;      // length of deleted slice
   ts: number;
   collapsed: boolean; // true = show clickable ellipsis; false = show text (expanded)
+  justCollapsed?: boolean; // transient flag to animate fold when collapsing
 };
 
 export default function Home() {
@@ -22,25 +23,42 @@ export default function Home() {
   // --- helpers ---
   function captureDeletion(text: string, atIndex: number) {
     if (!text) return;
-    setDeletions((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        n: nextFootNo,
-        text,
-        at: Math.max(0, Math.min(atIndex, doc.length)),
-        len: text.length,
-        ts: Date.now(),
-        collapsed: true,
-      },
-    ]);
+    const id = crypto.randomUUID();
+    const entry: Deletion = {
+      id,
+      n: nextFootNo,
+      text,
+      at: Math.max(0, Math.min(atIndex, doc.length)),
+      len: text.length,
+      ts: Date.now(),
+      collapsed: true,
+      justCollapsed: true,
+    };
+    setDeletions((prev) => [...prev, entry]);
+    // trigger width transition from len ch -> 1ch
+    setTimeout(() => {
+      setDeletions((prev) => prev.map((d) => (d.id === id ? { ...d, justCollapsed: false } : d)));
+    }, 0);
     setNextFootNo((n) => n + 1);
   }
 
   function toggleDeletion(id: string) {
+    let willCollapse = false;
     setDeletions((prev) =>
-      prev.map((d) => (d.id === id ? { ...d, collapsed: !d.collapsed } : d))
+      prev.map((d) => {
+        if (d.id !== id) return d;
+        willCollapse = !d.collapsed;
+        return { ...d, collapsed: !d.collapsed, justCollapsed: !d.collapsed ? true : d.justCollapsed };
+      })
     );
+    if (willCollapse) {
+      // animate then clear flag
+      setTimeout(() => {
+        setDeletions((prev) => prev.map((d) => (d.id === id ? { ...d, justCollapsed: false } : d)));
+      }, 0);
+    }
+    // keep typing focus on the editor
+    taRef.current?.focus();
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -109,6 +127,12 @@ export default function Home() {
               opacity: 0.8,
               borderBottom: "1px dotted",
               userSelect: "none",
+              display: "inline-block",
+              pointerEvents: "auto",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              width: d.justCollapsed ? `${Math.max(1, Math.min(40, d.len))}ch` : "1ch",
+              transition: "width 220ms ease",
             }}
             title={`Click to expand hidden text [^${d.n}]`}
             aria-label={`Expand deletion ${d.n}`}
@@ -121,7 +145,7 @@ export default function Home() {
           <span
             key={d.id}
             onClick={() => toggleDeletion(d.id)}
-            style={{ textDecoration: "line-through", cursor: "pointer" }}
+            style={{ textDecoration: "line-through", cursor: "pointer", pointerEvents: "auto" }}
             title={`Click to collapse text [^${d.n}]`}
             aria-label={`Collapse deletion ${d.n}`}
           >
@@ -197,42 +221,57 @@ export default function Home() {
     <main style={{ padding: "2rem", display: "grid", gap: "1.25rem", maxWidth: 900, margin: "0 auto" }}>
       <h1>📝 Collapsible — in-place ellipses (click to expand)</h1>
 
-      <label style={{ fontWeight: 600 }}>Editor</label>
-      <textarea
-        ref={taRef}
-        value={doc}
-        onChange={onChange}
-        onKeyDown={onKeyDown}
-        onSelect={onSelect}
-        placeholder="Type, select a range, press Backspace → it collapses into a clickable ellipsis."
-        style={{
-          width: "100%",
-          height: 240,
-          padding: "12px",
-          borderRadius: 12,
-          border: "1px solid #444",
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-          lineHeight: 1.5,
-        }}
-      />
-
       <div>
         <label style={{ fontWeight: 600, display: "block", marginBottom: 8 }}>
-          Preview (select + backspace → … , click … to expand / collapse)
+          Editor (type directly; select + Backspace folds into …)
         </label>
-        <div
-          style={{
-            whiteSpace: "pre-wrap",
-            wordWrap: "break-word",
-            border: "1px solid #333",
-            borderRadius: 12,
-            padding: 12,
-            background: "var(--preview-bg, #0b0b0b)",
-            fontFamily: "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial",
-            minHeight: 120,
-          }}
-        >
-          <Preview text={doc} notes={deletions} />
+        <div style={{ position: "relative" }}>
+          {/* Underlying textarea for input + caret; visually transparent text */}
+          <textarea
+            ref={taRef}
+            value={doc}
+            onChange={onChange}
+            onKeyDown={onKeyDown}
+            onSelect={onSelect}
+            placeholder="Type, select a range, press Backspace → it collapses into a clickable ellipsis."
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: 240,
+              padding: "12px",
+              borderRadius: 12,
+              border: "1px solid #444",
+              background: "transparent",
+              color: "transparent",
+              caretColor: "#fff",
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              lineHeight: 1.5,
+              resize: "none",
+              outline: "none",
+              zIndex: 1,
+            }}
+          />
+
+          {/* Overlay preview (clickable ellipses); let only spans capture clicks */}
+          <div
+            aria-hidden
+            style={{
+              position: "relative",
+              pointerEvents: "none",
+              whiteSpace: "pre-wrap",
+              wordWrap: "break-word",
+              border: "1px solid #333",
+              borderRadius: 12,
+              padding: 12,
+              background: "var(--preview-bg, #0b0b0b)",
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              minHeight: 240,
+              zIndex: 0,
+            }}
+          >
+            <Preview text={doc} notes={deletions} />
+          </div>
         </div>
         <div style={{ marginTop: 12 }}>
           <button
