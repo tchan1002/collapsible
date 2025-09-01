@@ -143,6 +143,56 @@ export default function Home() {
 
   const sortedNotes = [...deletions].sort((a, b) => a.n - b.n);
 
+  // --- export to Markdown helpers ---
+  function generateMarkdownBody(text: string, notes: Deletion[]): string {
+    if (notes.length === 0) return text;
+    const sorted = [...notes].sort((a, b) => (a.at - b.at) || (b.len - a.len));
+    let i = 0;
+    const parts: string[] = [];
+    for (const d of sorted) {
+      const start = Math.max(0, Math.min(d.at, text.length));
+      const end = Math.max(start, Math.min(d.at + d.len, text.length));
+      if (start > i) parts.push(text.slice(i, start));
+      if (d.collapsed) {
+        parts.push("[ … ]");
+      } else {
+        parts.push(`~~${text.slice(start, end)}~~`);
+      }
+      i = end;
+    }
+    if (i < text.length) parts.push(text.slice(i));
+    return parts.join("");
+  }
+
+  function generateFootnotes(notes: Deletion[]): string {
+    if (notes.length === 0) return "";
+    const sorted = [...notes].sort((a, b) => a.n - b.n);
+    return sorted.map((d) => `[^${d.n}]: ~~${d.text}~~`).join("\n");
+  }
+
+  function buildMarkdown(): string {
+    const body = generateMarkdownBody(doc, deletions);
+    const foot = generateFootnotes(deletions);
+    if (foot) {
+      return `${body}\n\n## Footnotes\n${foot}\n`;
+    }
+    return body;
+  }
+
+  function onDownloadMd() {
+    const md = buildMarkdown();
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "draft.md";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Give the browser a tick to start the download before revoking
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   return (
     <main style={{ padding: "2rem", display: "grid", gap: "1.25rem", maxWidth: 900, margin: "0 auto" }}>
       <h1>📝 Collapsible — in-place ellipses (click to expand)</h1>
@@ -183,6 +233,22 @@ export default function Home() {
           }}
         >
           <Preview text={doc} notes={deletions} />
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <button
+            type="button"
+            onClick={onDownloadMd}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #444",
+              background: "#111",
+              color: "#fff",
+              cursor: "pointer",
+            }}
+          >
+            Download .md
+          </button>
         </div>
       </div>
 
